@@ -1,25 +1,41 @@
-name: CI
+name: RDP Access
 
 on: [push, workflow_dispatch]
 
 jobs:
   build:
-
-    runs-on: windows-latest
+    runs-on: windows-2022   # Pin to Windows Server 2022 to avoid migration warning
 
     steps:
-    - name: Download
+    - name: Download ngrok
       run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
-    - name: Extract
-      run: Expand-Archive ngrok.zip
-    - name: Auth
-      run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
+
+    - name: Extract ngrok
+      run: Expand-Archive ngrok.zip -DestinationPath .
+
+    - name: Authenticate ngrok
+      run: .\ngrok\ngrok.exe config add-authtoken $Env:NGROK_AUTH_TOKEN
       env:
         NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-    - name: Enable TS
-      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
-    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
-    - name: Create Tunnel
-      run: .\ngrok\ngrok.exe tcp 3389
+
+    - name: Enable Remote Desktop
+      run: |
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+        Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+
+    - name: Start ngrok tunnel
+      run: Start-Process -NoNewWindow -FilePath .\ngrok\ngrok.exe -ArgumentList "tcp 3389"
+
+    - name: Wait for ngrok to start
+      run: Start-Sleep -Seconds 10
+
+    - name: Show RDP address
+      run: |
+        $url = Invoke-RestMethod -UseBasicParsing http://127.0.0.1:4040/api/tunnels | Select-Object -ExpandProperty tunnels | Where-Object {$_.proto -eq "tcp"} | Select-Object -ExpandProperty public_url
+        Write-Output "====================================="
+        Write-Output "✅ RDP Address: $url"
+        Write-Output "🖥️  Username: runneradmin"
+        Write-Output "🔑 Password: P@ssw0rd!"
+        Write-Output "====================================="
